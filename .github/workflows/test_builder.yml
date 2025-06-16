@@ -1,0 +1,208 @@
+name: "Test Build and Publish"
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'version.json'  # 只在 version.json 更改时触发
+
+jobs:
+  unpack-and-publish:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: 'macos-latest' # for Arm based macs (M1 and above).
+            args: '--target aarch64-apple-darwin'
+          - platform: 'macos-latest' # for Intel based macs.
+            args: '--target x86_64-apple-darwin'
+          # - platform: 'ubuntu-22.04'
+          #   args: ''
+          - platform: 'windows-latest'
+            args: '-c src-tauri/tauri.windows.conf.json'
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get Gitea source code
+        env:
+          GITEA_TOKEN: ${{ secrets.GITEA_ACCESS_TOKEN }}
+          GITEA_REPO_URL: ${{ secrets.GITEA_REPO_URL }}
+        run: |
+          # 克隆 Gitea 仓库（使用 token 进行认证）
+          git clone -b test https://${GITEA_TOKEN}@${GITEA_REPO_URL#https://} source_code
+          
+          # 复制所有需要的文件到当前工作目录
+          cp -r source_code/* .
+
+      - name: Modify Cargo.toml (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          sed -i '' 's|tauri = { version = "2", features = \["devtools", "test"\] }|tauri = { version = "2", features = \[\] }|g' src-tauri/Cargo.toml
+          echo "Modified Cargo.toml"
+
+          sed -i '' 's|https://github.com/LimLLL/BHZH_Project_Management_Release|https://github.com/LimLLL/BHZH_Project_Management_Test|g' src-tauri/tauri.conf.json
+          echo "Modified tauri.conf.json"
+          cat src-tauri/tauri.conf.json
+
+      - name: Modify Cargo.toml (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          (Get-Content src-tauri/Cargo.toml) -replace 'tauri = { version = "2", features = \["devtools", "test"\] }', 'tauri = { version = "2", features = [] }' | Set-Content src-tauri/Cargo.toml
+          Write-Output "Modified Cargo.toml"
+
+          (Get-Content src-tauri/tauri.windows.conf.json) -replace 'https://github.com/LimLLL/BHZH_Project_Management_Release', 'https://github.com/LimLLL/BHZH_Project_Management_Test' | Set-Content src-tauri/tauri.windows.conf.json
+          Write-Output "Modified tauri.windows.conf.json"
+          
+      - name: Modify Cargo.toml (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sed -i 's|tauri = { version = "2", features = \["devtools", "test"\] }|tauri = { version = "2", features = \[\] }|g' src-tauri/Cargo.toml
+          echo "Modified Cargo.toml"
+
+          sed -i 's|https://github.com/LimLLL/BHZH_Project_Management_Release|https://github.com/LimLLL/BHZH_Project_Management_Test|g' src-tauri/tauri.conf.json
+          echo "Modified tauri.conf.json"
+          
+
+      - name: Install dependencies (Ubuntu only)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - uses: pnpm/action-setup@v4
+        name: Install pnpm
+        with:
+          version: 10
+          run_install: false
+          
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: 'pnpm'
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+          key: ${{ matrix.args }}
+
+      - name: Install frontend dependencies
+        run: |
+          pnpm install
+
+      - uses: LimLLL/tauri-action-renameArtifacts@v0.5.18
+        env:
+          NODE_ENV: test
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: app-v__VERSION__
+          releaseName: 'App v__VERSION__'
+          releaseBody: ''
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
+          updaterJsonPreferNsis: true
+          retryAttempts: 3
+          renameArtifacts: 'BHZH_Project_Management'
+
+  modify-latest-json:
+    needs: unpack-and-publish
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Fetch Latest Draft Release and Modify latest.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+            REPO="${GITHUB_REPOSITORY}"  # Use the GITHUB_REPOSITORY environment variable
+          
+            # Find the latest release draft
+            RELEASE_ID=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+              "https://api.github.com/repos/${REPO}/releases" | \
+              jq -r '[.[] | select(.draft == true)][0].id')
+          
+            if [ -z "$RELEASE_ID" ]; then
+              echo "No draft release found"
+              exit 1
+            fi
+          
+            # Get assets for the draft release
+            ASSETS=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+              "https://api.github.com/repos/${REPO}/releases/$RELEASE_ID/assets")
+          
+            LATEST_JSON_ASSET=$(echo "$ASSETS" | jq -r '.[] | select(.name == "latest.json") | .url')
+          
+            if [ -z "$LATEST_JSON_ASSET" ]; then
+              echo "No latest.json asset found"
+              exit 1
+            fi
+          
+            # Download the latest.json
+            curl -L -H "Authorization: token $GITHUB_TOKEN" \
+              -H "Accept: application/octet-stream" \
+              "$LATEST_JSON_ASSET" -o latest.json
+          
+            # Delete existing latest.json asset if it exists
+            ASSET_ID=$(echo "$ASSETS" | jq -r '.[] | select(.name == "latest.json") | .id')
+            if [ -n "$ASSET_ID" ]; then
+              curl -X DELETE \
+                -H "Authorization: token $GITHUB_TOKEN" \
+                "https://api.github.com/repos/${REPO}/releases/assets/$ASSET_ID"
+            fi
+          
+            # Modify latest.json with GitHub Proxy
+            sed -i 's|https://github.com/|https://ghproxy.uk.arm.useforall.top/https://github.com/|g' latest.json
+            
+            # Show the modified content
+            cat latest.json
+          
+            # Upload the modified latest.json
+            curl -X POST \
+              -H "Authorization: token $GITHUB_TOKEN" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary "@latest.json" \
+              "https://uploads.github.com/repos/${REPO}/releases/$RELEASE_ID/assets?name=latest.json"
+  # cleanup:
+  #   needs: unpack-and-publish
+  #   runs-on: ubuntu-22.04
+  #   permissions:
+  #     contents: write
+  #   steps:
+  #     - name: Checkout code
+  #       uses: actions/checkout@v4
+  #     - name: Delete compressed_code.zip
+  #       run: |
+  #         rm -f compressed_code.zip
+  #         echo "Deleted compressed_code.zip"
+  #     - name: Commit deletion
+  #       run: |
+  #         git config --local user.name "github-actions[bot]"
+  #         git config --local user.email "github-actions[bot]@users.noreply.github.com"
+  #         git add compressed_code.zip
+  #         git commit -m "Delete compressed_code.zip [skip ci]"
+  #         git push
