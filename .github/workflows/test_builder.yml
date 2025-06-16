@@ -37,7 +37,7 @@ jobs:
           GITEA_REPO_URL: ${{ secrets.GITEA_REPO_URL }} # 例如 "https://gitea.example.com/username/repo.git"
         run: |
           # 克隆 Gitea 仓库（使用 token 进行认证）
-          git clone "https://${GITEA_TOKEN}@${GITEA_REPO_URL#https://}" source_code
+          git clone -b test "https://${GITEA_TOKEN}@${GITEA_REPO_URL#https://}" source_code
           
           # 复制所有需要的文件到当前工作目录
           cp -r source_code/* .
@@ -54,7 +54,7 @@ jobs:
           $repoUrl = $repoUrl -replace "^https://", ""
           
           # 克隆 Gitea 仓库（使用 token 进行认证）
-          git clone "https://$env:GITEA_TOKEN@$repoUrl" source_code
+          git clone -b test "https://$env:GITEA_TOKEN@$repoUrl" source_code
           
           # 复制所有需要的文件到当前工作目录
           Copy-Item -Path "source_code\*" -Destination "." -Recurse -Force
