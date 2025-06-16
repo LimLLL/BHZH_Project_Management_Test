@@ -30,16 +30,34 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Get Gitea source code
+      - name: Get Gitea source code (Unix)
+        if: runner.os != 'Windows'
         env:
           GITEA_TOKEN: ${{ secrets.GITEA_ACCESS_TOKEN }}
-          GITEA_REPO_URL: ${{ secrets.GITEA_REPO_URL }}
+          GITEA_REPO_URL: ${{ secrets.GITEA_REPO_URL }} # 例如 "https://gitea.example.com/username/repo.git"
         run: |
           # 克隆 Gitea 仓库（使用 token 进行认证）
-          git clone -b test https://${GITEA_TOKEN}@${GITEA_REPO_URL#https://} source_code
+          git clone "https://${GITEA_TOKEN}@${GITEA_REPO_URL#https://}" source_code
           
           # 复制所有需要的文件到当前工作目录
           cp -r source_code/* .
+      
+      - name: Get Gitea source code (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        env:
+          GITEA_TOKEN: ${{ secrets.GITEA_ACCESS_TOKEN }}
+          GITEA_REPO_URL: ${{ secrets.GITEA_REPO_URL }} # 例如 "https://gitea.example.com/username/repo.git"
+        run: |
+          # 提取主机名和路径
+          $repoUrl = $env:GITEA_REPO_URL
+          $repoUrl = $repoUrl -replace "^https://", ""
+          
+          # 克隆 Gitea 仓库（使用 token 进行认证）
+          git clone "https://$env:GITEA_TOKEN@$repoUrl" source_code
+          
+          # 复制所有需要的文件到当前工作目录
+          Copy-Item -Path "source_code\*" -Destination "." -Recurse -Force
 
       - name: Modify Cargo.toml (macOS)
         if: runner.os == 'macOS'
