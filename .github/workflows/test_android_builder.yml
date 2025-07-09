@@ -33,9 +33,6 @@ jobs:
           # 复制所有需要的文件到当前工作目录
           cp -r source_code/* .
 
-          sed -i 's|https://github.com/LimLLL/BHZH_Project_Management_Release|https://github.com/LimLLL/BHZH_Project_Management_Test|g' src-tauri/tauri.conf.json
-          echo "Modified tauri.conf.json"
-
       - name: Cache Gradle packages
         uses: actions/cache@v4
         with:
