@@ -28,10 +28,13 @@ jobs:
           GITEA_REPO_URL: ${{ secrets.GITEA_REPO_URL }}
         run: |
           # 克隆 Gitea 仓库（使用 token 进行认证）
-          git clone https://${GITEA_TOKEN}@${GITEA_REPO_URL#https://} source_code
+          git clone -b test https://${GITEA_TOKEN}@${GITEA_REPO_URL#https://} source_code
           
           # 复制所有需要的文件到当前工作目录
           cp -r source_code/* .
+
+          sed -i 's|https://github.com/LimLLL/BHZH_Project_Management_Release|https://github.com/LimLLL/BHZH_Project_Management_Test|g' src-tauri/tauri.conf.json
+          echo "Modified tauri.conf.json"
 
       - name: Cache Gradle packages
         uses: actions/cache@v4
